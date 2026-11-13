@@ -237,7 +237,7 @@ main.drawer-panel #fab{opacity:0;visibility:hidden}
   .lib-grid{grid-template-columns:1fr 1fr 1fr}
   .brand span,footer .only2d{display:none!important}
 }
-#langSel,[data-tool="demolish"],[data-layer="bearing"],#s60,#s100{display:none!important}
+#langSel,[data-layer="bearing"],#s60,#s100{display:none!important}
 @media(max-width:700px){.brand,#layers,#toggles3d,.range,#fullscreen,details.menu,.grp:has(>[data-cut]),.grp:has(>#vIso),.grp:has(>.range){display:none!important}}
 #fab{flex-wrap:wrap;justify-content:center;max-width:94vw}
 #fab .pal{flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;justify-content:center;padding:4px 2px 2px}
@@ -2323,7 +2323,7 @@ function buildArch(){
       const pl = new THREE.PointLight(0xffd9a8, 0, 7, 1.6); pl.position.set(wx(r.at[0]), H - .25, wz(r.at[1])); lampG.add(pl);
     }
   });
-  [...DOORS, ...SLIDES].forEach(d => { const [x0, y0, x1, y1] = d.rect; const s = box(M(x1-x0), .012, M(y1-y0), mat('#d8d0c0', {roughness:.3}), wx((x0+x1)/2), 0, wz((y0+y1)/2)); s.castShadow = false; archFloor.add(s); });
+  [...DOORS, ...SLIDES, ...PATCHES].forEach(d => { const [x0, y0, x1, y1] = d.rect; const s = box(M(x1-x0), .012, M(y1-y0), mat('#d8d0c0', {roughness:.3}), wx((x0+x1)/2), 0, wz((y0+y1)/2)); s.castShadow = false; archFloor.add(s); });
   WALLS.forEach((w, i) => {
     if (state.demolished.includes('w'+i)) return;
     if (w[5] !== 'm') wallBox(w, 0, w[4] === 'low' ? Math.min(w[6] || 1, top) : top);
@@ -2394,7 +2394,7 @@ function buildLabels(){
 // 只重建变化的部分
 function sync(force){
   if (!inited || (!active && !force)) return;
-  const a = JSON.stringify([state.rooms, state.demolished, opt.cut]), f = JSON.stringify(state.furniture), l = JSON.stringify([state.rooms, opt.cut]);
+  const a = JSON.stringify([state.rooms, state.demolished, state.moved, opt.cut]), f = JSON.stringify(state.furniture), l = JSON.stringify([state.rooms, opt.cut]);
   if (force || a !== sigArch){ sigArch = a; buildArch(); }
   if (force || f !== sigFurn){ sigFurn = f; buildFurn(); }
   if (force || l !== sigLabels){ sigLabels = l; buildLabels(); }
@@ -2751,6 +2751,167 @@ function shot(){ const a = document.createElement('a'); a.download = tr('户型�
 function relang(){ syncWalkTexts(); if (inited) buildLabels(); }
 
 window.View3D = {enter, exit, relang, sync:() => sync(), shot, groundAt, flyToRoom:id => active && !anim && flyToRoom(id), walking:() => active && opt.mode === 'walk'};
+</script>
+<script>
+// Attrezzo «Muri» della pagina Arreda (Camillo 13/11/2026: «un'opzione per rimuovere o spostare muri, devo valutare una
+// ristrutturazione»). Iniettato da arreda.py dopo il motore di prova-mobili, che non si tocca: riusa il suo attrezzo
+// 'demolish' (nascosto dal motore) e il suo state.demolished, e aggiunge state.moved = {gruppo: spostamento in mm}.
+// Un gruppo = i rettangoli di un muro interno + le porte che ci stanno dentro (calcolati da arreda.py).
+// state.moved ha per chiave il rettangolo piu' basso del gruppo (dato della casa, non dell'algoritmo di raggruppamento).
+// Muri perimetrali e verso i balconi: gruppo -1, non si toccano.
+var PATCHES = [];   // pavimento dove c'era un muro tolto o spostato (letto da buildArch, riga corretta da arreda.py)
+(function () {
+  const ED = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, -1, -1, -1, -1, -1, -1, 1, -1, 1, 2, 3, -1, -1, 2, -1, -1, 4, 5, 7, 6, -1, 7, -1, -1, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1], GR = [{"v": false, "walls": [10], "doors": []}, {"v": true, "walls": [17, 19], "doors": [1]}, {"v": true, "walls": [20, 24], "doors": [3]}, {"v": false, "walls": [21], "doors": []}, {"v": false, "walls": [27], "doors": []}, {"v": false, "walls": [28], "doors": []}, {"v": true, "walls": [30], "doors": []}, {"v": true, "walls": [32, 29], "doors": [4]}, {"v": true, "walls": [35], "doors": []}];
+  const PASSO = 50, MAX = 3000;
+  const BW = WALLS.map(w => w.slice()), BD = DOORS.map(d => JSON.parse(JSON.stringify(d)));
+  let scelto = null, trascina = null;
+
+  const K = gi => String(Math.min(...GR[gi].walls));
+  function demolito(g) { return GR[g].walls.every(i => state.demolished.includes('w' + i)); }
+  const CHIAVI = new Set(GR.map((g, gi) => K(gi)));
+  function applica() {
+    if (!state.moved) state.moved = {};
+    Object.keys(state.moved).forEach(k => { if (!CHIAVI.has(k)) delete state.moved[k]; });   // salvataggi di una versione precedente
+    PATCHES.length = 0;
+    WALLS.forEach((w, i) => { for (let k = 0; k < 4; k++) w[k] = BW[i][k]; });
+    const via = new Set(), sp = {};
+    GR.forEach((g, gi) => {
+      const off = state.moved[K(gi)] || 0;
+      if (demolito(gi)) {
+        g.walls.forEach(i => PATCHES.push({rect: BW[i].slice(0, 4)}));
+        g.doors.forEach(j => { via.add(j); PATCHES.push({rect: BD[j].rect.slice()}); });
+      } else if (off) {
+        const dx = g.v ? off : 0, dy = g.v ? 0 : off;
+        g.walls.forEach(i => { const w = WALLS[i]; w[0] += dx; w[2] += dx; w[1] += dy; w[3] += dy; PATCHES.push({rect: BW[i].slice(0, 4)}); });
+        g.doors.forEach(j => { sp[j] = [dx, dy]; PATCHES.push({rect: BD[j].rect.slice()}); });
+      }
+    });
+    DOORS.length = 0;
+    BD.forEach((d, j) => {
+      if (via.has(j)) return;
+      const c = JSON.parse(JSON.stringify(d)), s = sp[j];
+      if (s) { c.rect = [c.rect[0] + s[0], c.rect[1] + s[1], c.rect[2] + s[0], c.rect[3] + s[1]]; c.h = [c.h[0] + s[0], c.h[1] + s[1]]; }
+      DOORS.push(c);
+    });
+  }
+  function disegna() {
+    let s = '';
+    GR.forEach((g, gi) => {
+      if (!(state.moved[K(gi)]) || demolito(gi)) return;
+      g.walls.forEach(i => { const [a, b, c, d] = BW[i];
+        s += `<rect x="${a}" y="${b}" width="${c - a}" height="${d - b}" fill="rgba(198,91,58,.08)" stroke="#c65b3a" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" pointer-events="none"/>`; });
+    });
+    if (scelto !== null && ui.tool === 'demolish') GR[scelto].walls.forEach(i => { const [a, b, c, d] = demolito(scelto) ? BW[i] : WALLS[i];
+      s += `<rect x="${a - 30}" y="${b - 30}" width="${c - a + 60}" height="${d - b + 60}" fill="none" stroke="#b5653a" stroke-width="2.5" vector-effect="non-scaling-stroke" pointer-events="none"/>`; });
+    $('#gWalls').insertAdjacentHTML('beforeend', s);
+    barra();
+  }
+  // barra in basso col muro scelto
+  const bar = document.createElement('div');
+  bar.id = 'barraMuri';
+  bar.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:60;background:#fff;border:1px solid #d9d2c4;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.15);padding:10px 12px;display:none;gap:8px;align-items:center;flex-wrap:wrap;font:14px system-ui,sans-serif;max-width:calc(100vw - 24px)';
+  document.body.appendChild(bar);
+  function barra() {
+    const tutti = Object.values(state.moved || {}).some(v => v) || GR.some((g, gi) => demolito(gi));
+    if (ui.tool !== 'demolish' || (scelto === null && !tutti)) { bar.style.display = 'none'; return; }
+    bar.style.display = 'flex';
+    let h = '';
+    if (scelto !== null) {
+      const dem = demolito(scelto), off = state.moved[K(scelto)] || 0;
+      h += `<b>${dem ? 'Muro demolito' : off ? 'Muro spostato di ' + (off > 0 ? '+' : '') + String(off / 10).replace('.', ',') + ' cm' : 'Muro scelto: trascinalo per spostarlo'}</b>`;
+      h += `<button class="btn" data-m="dem">${dem ? 'Rimetti il muro' : 'Demolisci'}</button>`;
+      if (off && !dem) h += `<button class="btn" data-m="zero">Rimetti al suo posto</button>`;
+    } else h += '<b>Tocca un muro interno</b>';
+    if (tutti) h += `<button class="btn" data-m="tutti">Casa com'è oggi</button>`;
+    h += `<span style="color:#56656B;font-size:12px;flex-basis:100%">Le superfici delle stanze restano quelle di oggi. Muri perimetrali e verso i balconi non si toccano. I muri che si appoggiano a quello spostato non si allungano.</span>`;
+    bar.innerHTML = h;
+  }
+  bar.addEventListener('click', e => {
+    const b = e.target.closest('[data-m]'); if (!b) return;
+    const m = b.dataset.m;
+    if (m === 'tutti') { scelto = null; mutate(() => { state.moved = {}; state.demolished = []; }); toast('Muri come sono oggi'); return; }
+    if (scelto === null) return;
+    const ids = GR[scelto].walls.map(i => 'w' + i);
+    if (m === 'dem') {
+      const dem = demolito(scelto);
+      mutate(() => { state.demolished = dem ? state.demolished.filter(x => !ids.includes(x)) : [...state.demolished.filter(x => !ids.includes(x)), ...ids]; });
+      toast(dem ? 'Muro rimesso' : 'Muro demolito');
+    } else if (m === 'zero') mutate(() => { delete state.moved[K(scelto)]; });
+  });
+  // tocco e trascinamento sui muri, prima del motore (fase di cattura)
+  // il muro sotto il dito: il rettangolo toccato, o il muro interno piu' vicino entro ~14 px (un muro da 10 cm e' largo 6 px)
+  function muroSotto(e) {
+    const el = e.target.closest && e.target.closest('[data-wall]');
+    if (el) return +el.dataset.wall.slice(1);
+    const p = toMM(e), tol = (e.pointerType === 'mouse' ? 6 : 14) / view.s;
+    let best = -1, bd = tol;
+    WALLS.forEach((w, i) => {
+      if (ED[i] < 0 || state.demolished.includes('w' + i)) return;
+      const dx = Math.max(w[0] - p.x, 0, p.x - w[2]), dy = Math.max(w[1] - p.y, 0, p.y - w[3]), d = Math.hypot(dx, dy);
+      if (d <= bd) { bd = d; best = i; }
+    });
+    return best < 0 ? null : best;
+  }
+  function annulla() {   // gesto interrotto (secondo dito, pointercancel): il muro torna dove era, niente in Annulla
+    if (!trascina) return;
+    const k = K(trascina.gi);
+    if (trascina.off0) state.moved[k] = trascina.off0; else delete state.moved[k];
+    trascina = null; renderAll();
+  }
+  svg.addEventListener('pointerdown', e => {
+    if (ui.tool !== 'demolish' || e.button > 0) return;
+    // un secondo dito appartiene al motore (pinch e spostamento della vista): si lascia passare
+    if (!e.isPrimary || pinch || touches.size) { annulla(); return; }
+    const iw = muroSotto(e);
+    if (iw === null) return;
+    e.stopImmediatePropagation(); e.preventDefault();
+    // il dito preso qui resta noto al motore: se arriva un secondo dito, parte il suo pinch (revisore, 13/11/2026)
+    if (e.pointerType !== 'mouse') { touches.set(e.pointerId, {x: e.clientX, y: e.clientY}); miei.add(e.pointerId); }
+    const gi = ED[iw];
+    if (gi < 0) { toast('Muro perimetrale o verso il balcone: non si sposta e non si demolisce'); return; }
+    scelto = gi; renderAll();
+    if (demolito(gi)) return;
+    const p = toMM(e);
+    trascina = {gi, da: GR[gi].v ? p.x : p.y, off0: state.moved[K(gi)] || 0, prima: snap(), mosso: false, id: e.pointerId};
+    svg.setPointerCapture(e.pointerId);
+  }, true);
+  svg.addEventListener('pointermove', e => {
+    if (miei.has(e.pointerId)) touches.set(e.pointerId, {x: e.clientX, y: e.clientY});
+    if (!trascina || e.pointerId !== trascina.id) return;
+    e.stopImmediatePropagation();
+    const p = toMM(e), d = (GR[trascina.gi].v ? p.x : p.y) - trascina.da;
+    const off = Math.max(-MAX, Math.min(MAX, Math.round((trascina.off0 + d) / PASSO) * PASSO));
+    if (off !== (state.moved[K(trascina.gi)] || 0)) {
+      state.moved[K(trascina.gi)] = off; trascina.mosso = true;
+      if (!quadro) quadro = requestAnimationFrame(() => { quadro = 0; renderAll(); });   // al massimo un ridisegno per fotogramma
+    }
+  }, true);
+  let quadro = 0;
+  const miei = new Set();
+  const lascia = e => { if (miei.delete(e.pointerId)) { touches.delete(e.pointerId); e.stopImmediatePropagation(); } };
+  const fine = e => {
+    lascia(e);
+    if (!trascina || e.pointerId !== trascina.id) return;
+    e.stopImmediatePropagation();
+    if (trascina.mosso) { const k = K(trascina.gi); if (!state.moved[k]) delete state.moved[k]; commit(trascina.prima); renderAll(); }
+    trascina = null;
+  };
+  svg.addEventListener('pointerup', fine, true);
+  svg.addEventListener('pointercancel', e => { lascia(e); if (trascina && e.pointerId === trascina.id) { e.stopImmediatePropagation(); annulla(); } }, true);
+
+  const _ra = renderAll;
+  renderAll = function () { applica(); _ra(); renderOpenings(); disegna(); };
+  const _st = setTool;
+  setTool = function (t) { if (t !== 'demolish') scelto = null; _st(t); renderAll(); };
+  const _sh = syncModeHint;
+  syncModeHint = function () {
+    _sh();
+    if (ui.tool === 'demolish') { const h = $('#modehint'); h.textContent = 'Muri: tocca un muro interno e trascinalo per spostarlo (5 cm a scatto), oppure demoliscilo dalla barra in basso'; h.classList.add('show'); }
+  };
+  const btn = document.querySelector('#tools [data-tool="demolish"]');
+  if (btn) { btn.textContent = 'Muri'; btn.title = 'Demolisci o sposta i muri interni'; btn.dataset.en = 'Muri'; btn.dataset.enTitle = 'Demolisci o sposta i muri interni'; }
+  renderAll();
+})();
 </script>
 </body>
 </html>
