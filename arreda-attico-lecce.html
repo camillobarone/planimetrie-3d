@@ -512,7 +512,7 @@ function defaultState(){
   return {furniture:defaultFurniture(), rooms, demolished:[], measures:[]};
 }
 
-const STORE = 'mondo-prova-mobili-attico-lecce';
+const STORE = 'mondo-prova-mobili-attico-lecce-3f34ed41';
 function load(){
   try { const s = JSON.parse(localStorage.getItem(STORE)); if (s && Array.isArray(s.furniture)) return fixState(s); } catch(e) {}
   return null;
@@ -2326,7 +2326,7 @@ function buildArch(){
   [...DOORS, ...SLIDES].forEach(d => { const [x0, y0, x1, y1] = d.rect; const s = box(M(x1-x0), .012, M(y1-y0), mat('#d8d0c0', {roughness:.3}), wx((x0+x1)/2), 0, wz((y0+y1)/2)); s.castShadow = false; archFloor.add(s); });
   WALLS.forEach((w, i) => {
     if (state.demolished.includes('w'+i)) return;
-    if (w[5] !== 'm') wallBox(w, 0, w[4] === 'low' ? Math.min(1, top) : top);
+    if (w[5] !== 'm') wallBox(w, 0, w[4] === 'low' ? Math.min(w[6] || 1, top) : top);
     colliders.push([wx(w[0]), wz(w[1]), wx(w[2]), wz(w[3])]);
   });
   muroCurvo(WALLMESH, top);
