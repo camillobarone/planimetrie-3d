@@ -512,7 +512,7 @@ function defaultState(){
   return {furniture:defaultFurniture(), rooms, demolished:[], measures:[]};
 }
 
-const STORE = 'mondo-prova-mobili-cavallino-leuca-a8365823';
+const STORE = 'mondo-prova-mobili-cavallino-leuca-7eb7151b';
 function load(){
   try { const s = JSON.parse(localStorage.getItem(STORE)); if (s && Array.isArray(s.furniture)) return fixState(s); } catch(e) {}
   return null;
